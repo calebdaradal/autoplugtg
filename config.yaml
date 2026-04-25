@@ -1,0 +1,41 @@
+# AutoPlugTG configuration
+# Copy this file to config.yaml and fill in your values.
+# When running 24/7, you can edit config.yaml anytime; the app reloads it each cycle
+# (so changes to interval, destinations, or message count apply on the next run).
+# For interval change to take effect immediately, restart the app.
+
+# --- Telegram API (get from https://my.telegram.org) ---
+# Prefer setting these in .env as TELEGRAM_API_ID and TELEGRAM_API_HASH
+# api_id: 12345678
+# api_hash: "your_api_hash"
+
+# --- Run interval (minutes) ---
+interval_minutes: 90
+
+# --- Source: your original channel (ID or @username) ---
+# source_channel: -1003888999280
+source_channel: -1003664195790
+
+# --- How many of the latest messages to forward each run ---  
+messages_to_forward: 1
+
+# --- Destination channels and groups (IDs or @usernames) ---
+# Add/remove IDs as you add/remove channels. IDs are numbers; usernames are strings.
+destination_chats:
+  - -1003827881279
+  - -1003920468858
+  - -1003629746508
+  - -1003734479293
+  - -1003404564246
+  - -1003708219405
+  - -1003829244927
+  - -1003934848051
+  - -1003713468419
+  - -1002920160633
+  - -1003771946602
+  - -1002558505486
+  - -1002956637371
+delay_between_destinations_seconds: 2.0
+
+# --- Optional: delay between each message when forwarding (seconds) ---
+delay_between_messages_seconds: 1.0

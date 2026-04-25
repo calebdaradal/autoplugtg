@@ -1,6 +1,5 @@
 # Session and secrets
 .env
-config.yaml
 runtime_state.json
 
 # Python
