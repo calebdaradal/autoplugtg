@@ -25,6 +25,12 @@ except ImportError:
 CONFIG_PATH = Path(__file__).resolve().parent / "config.yaml"
 ENV_API_ID = "TELEGRAM_API_ID"
 ENV_API_HASH = "TELEGRAM_API_HASH"
+ENV_SOURCE_CHANNEL = "SOURCE_CHANNEL"
+ENV_DESTINATION_CHATS = "DESTINATION_CHATS"
+ENV_INTERVAL_MINUTES = "INTERVAL_MINUTES"
+ENV_MESSAGES_TO_FORWARD = "MESSAGES_TO_FORWARD"
+ENV_DELAY_DEST = "DELAY_BETWEEN_DESTINATIONS_SECONDS"
+ENV_DELAY_MSG = "DELAY_BETWEEN_MESSAGES_SECONDS"
 
 
 def coerce_chat_arg(text: str) -> int | str:
@@ -56,16 +62,15 @@ def _coerce_chat_id(value: Any) -> int | str | None:
 
 def load_raw_config() -> dict[str, Any]:
     if not CONFIG_PATH.exists():
-        raise FileNotFoundError(
-            f"Config not found: {CONFIG_PATH}\n"
-            "Copy config.example.yaml to config.yaml and fill in your values."
-        )
+        return {}
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
 
 
 def load_settings(*, strict: bool = True) -> dict[str, Any]:
-    """Load config from config.yaml and env. If strict=False, allow empty source/destinations for setup UI."""
+    """Load config from env vars (primary) with config.yaml as fallback.
+    config.yaml is optional — all values can be supplied via environment variables.
+    If strict=False, allow empty source/destinations for setup UI."""
     raw = load_raw_config()
 
     # API credentials: env overrides config
@@ -74,14 +79,15 @@ def load_settings(*, strict: bool = True) -> dict[str, Any]:
     if not api_id or not api_hash:
         raise ValueError(
             "Missing Telegram API credentials. Set TELEGRAM_API_ID and TELEGRAM_API_HASH "
-            "in .env or in config.yaml (api_id, api_hash). Get them from https://my.telegram.org"
+            "in environment variables or in config.yaml. Get them from https://my.telegram.org"
         )
     try:
         api_id = int(api_id)
     except (TypeError, ValueError):
         raise ValueError("api_id must be an integer")
 
-    interval = raw.get("interval_minutes", 60)
+    interval_env = os.environ.get(ENV_INTERVAL_MINUTES)
+    interval = interval_env if interval_env is not None else raw.get("interval_minutes", 60)
     try:
         interval = int(interval)
     except (TypeError, ValueError):
@@ -89,12 +95,16 @@ def load_settings(*, strict: bool = True) -> dict[str, Any]:
     if interval < 1:
         interval = 1
 
-    source = raw.get("source_channel")
-    source = _coerce_chat_id(source) if source is not None else None
+    source_env = os.environ.get(ENV_SOURCE_CHANNEL)
+    source_raw = source_env if source_env is not None else raw.get("source_channel")
+    source = _coerce_chat_id(source_raw) if source_raw is not None else None
     if strict and source is None:
-        raise ValueError("config.yaml must set 'source_channel' (your original channel ID or @username)")
+        raise ValueError(
+            "source_channel is not set. Use SOURCE_CHANNEL env var or set it in config.yaml."
+        )
 
-    n_msg = raw.get("messages_to_forward", 1)
+    n_msg_env = os.environ.get(ENV_MESSAGES_TO_FORWARD)
+    n_msg = n_msg_env if n_msg_env is not None else raw.get("messages_to_forward", 1)
     try:
         n_msg = int(n_msg)
     except (TypeError, ValueError):
@@ -102,19 +112,25 @@ def load_settings(*, strict: bool = True) -> dict[str, Any]:
     if n_msg < 1:
         n_msg = 1
 
-    dest_raw = raw.get("destination_chats") or []
+    dest_env = os.environ.get(ENV_DESTINATION_CHATS)
+    if dest_env is not None:
+        dest_raw = [d.strip() for d in dest_env.split(",") if d.strip()]
+    else:
+        dest_raw = raw.get("destination_chats") or []
     if not isinstance(dest_raw, list):
         dest_raw = [dest_raw]
     destination_chats = [_coerce_chat_id(d) for d in dest_raw if d is not None and str(d).strip() != ""]
     destination_chats = [d for d in destination_chats if d is not None]
 
-    delay_dest = raw.get("delay_between_destinations_seconds", 2)
+    delay_dest_env = os.environ.get(ENV_DELAY_DEST)
+    delay_dest = delay_dest_env if delay_dest_env is not None else raw.get("delay_between_destinations_seconds", 2)
     try:
         delay_dest = max(0, float(delay_dest))
     except (TypeError, ValueError):
         delay_dest = 2
 
-    delay_msg = raw.get("delay_between_messages_seconds", 1)
+    delay_msg_env = os.environ.get(ENV_DELAY_MSG)
+    delay_msg = delay_msg_env if delay_msg_env is not None else raw.get("delay_between_messages_seconds", 1)
     try:
         delay_msg = max(0, float(delay_msg))
     except (TypeError, ValueError):
