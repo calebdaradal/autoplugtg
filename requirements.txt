@@ -1,0 +1,10 @@
+# AutoPlugTG - Telegram channel forwarder + control bot
+pyrogram>=2.0.0
+pyyaml>=6.0
+python-dotenv>=1.0.0
+python-telegram-bot>=21.0
+ruamel.yaml>=0.18.0
+tzdata>=2024.1
+
+# Optional: faster crypto on Pyrogram. Needs C++ build tools on Windows; skip if install fails.
+# pip install tgcrypto
