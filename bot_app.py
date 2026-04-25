@@ -625,6 +625,22 @@ async def cmd_run_now(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await update.message.reply_text("Starting forward cycle now…")
 
 
+def _get_timeouts() -> dict:
+    """Read timeout overrides from env; fall back to generous defaults."""
+    def _f(name: str, default: float) -> float:
+        try:
+            return float(os.environ.get(name, default))
+        except (ValueError, TypeError):
+            return default
+
+    return {
+        "connect_timeout": _f("TG_CONNECT_TIMEOUT", 30.0),
+        "read_timeout": _f("TG_READ_TIMEOUT", 30.0),
+        "write_timeout": _f("TG_WRITE_TIMEOUT", 30.0),
+        "pool_timeout": _f("TG_POOL_TIMEOUT", 30.0),
+    }
+
+
 def build_application(token: str, *, tg_log_handler=None, primary_admin_id: int | None = None) -> Application:
     admins = _parse_admin_ids()
     log_admin = primary_admin_id if primary_admin_id is not None else (next(iter(admins)) if admins else None)
@@ -663,13 +679,30 @@ def build_application(token: str, *, tg_log_handler=None, primary_admin_id: int 
             except Exception:
                 pass
 
-    app = (
+    timeouts = _get_timeouts()
+    proxy_url = (
+        os.environ.get("TELEGRAM_PROXY")
+        or os.environ.get("HTTPS_PROXY")
+        or os.environ.get("https_proxy")
+        or os.environ.get("HTTP_PROXY")
+        or os.environ.get("http_proxy")
+    )
+
+    builder = (
         Application.builder()
         .token(token)
+        .connect_timeout(timeouts["connect_timeout"])
+        .read_timeout(timeouts["read_timeout"])
+        .write_timeout(timeouts["write_timeout"])
+        .pool_timeout(timeouts["pool_timeout"])
         .post_init(post_init)
         .post_shutdown(post_shutdown)
-        .build()
     )
+    if proxy_url:
+        log.info("Using proxy for Telegram API: %s", proxy_url)
+        builder = builder.proxy(proxy_url)
+
+    app = builder.build()
 
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("status", cmd_status))
