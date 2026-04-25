@@ -1,9 +1,6 @@
 # Session and secrets
 .env
 config.yaml
-*_session*
-*.session
-*.session-journal
 runtime_state.json
 
 # Python
