@@ -5,11 +5,12 @@ import asyncio
 import io
 import logging
 import os
+from datetime import datetime, timedelta, timezone
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 # Import forwarder before Pyrogram submodules — forwarder bootstraps asyncio (required on Py 3.10+).
-from forwarder import _get_app
+from forwarder import _get_app, run_forward_cycle
 from pyrogram.errors import PeerIdInvalid
 from login_bridge import LoginBridge, LoginStep
 from pyrogram_telegram_io import install_ainput_patch
@@ -182,9 +183,10 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"Setup complete (source + targets): {ready}\n"
         f"Paused: {st.paused}\n"
         f"Next run: {format_dt_local(st.next_run_datetime())}\n\n"
-        "Commands: /status /pause /resume /show_config /verify /dialogs\n"
+        "Commands: /status /pause /resume /run_now /show_config /verify /dialogs\n"
         "/set_source /add_target /remove_target /set_interval /set_messages\n"
         "/set_delay_dest /set_delay_msg\n"
+        "/run_now — trigger a forward cycle immediately and reset the interval from now\n"
         "/login [phone] — first-time login (optional phone as argument)\n"
         "If no session file exists, run /login then send your phone number."
     )
@@ -555,6 +557,74 @@ async def on_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
 
 
+async def _run_now_background(application: Application, chat_id: int) -> None:
+    client = application.bot_data.get("client")
+    if client is None or not client.is_connected:
+        try:
+            await application.bot.send_message(chat_id, "User client not connected. Use /login first.")
+        except Exception:
+            pass
+        return
+
+    try:
+        await run_forward_cycle(client)
+    except Exception as e:
+        log.exception("Manual forward cycle failed: %s", e)
+        try:
+            await application.bot.send_message(chat_id, f"Forward cycle failed: {e}")
+        except Exception:
+            pass
+        return
+
+    try:
+        cfg = load_settings(strict=False)
+        interval_min = max(1, int(cfg.get("interval_minutes", 60)))
+    except Exception:
+        interval_min = 60
+
+    nxt = datetime.now(timezone.utc) + timedelta(minutes=interval_min)
+    st = load_state()
+    st.set_next_run(nxt)
+    save_state(st)
+
+    await _stop_scheduler(application)
+    _ensure_scheduler(application)
+
+    try:
+        await application.bot.send_message(
+            chat_id,
+            f"Forward cycle complete.\nNext run scheduled at:\n{format_dt_local(nxt)}",
+        )
+    except Exception:
+        pass
+
+
+async def cmd_run_now(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    admins: set[int] = context.application.bot_data["admin_ids"]
+    if not _admin_ok(update.effective_user.id if update.effective_user else None, admins):
+        return
+    client = context.application.bot_data.get("client")
+    if client is None or not client.is_connected:
+        await update.message.reply_text("User client not connected. Use /login first.")
+        return
+    existing = context.application.bot_data.get("run_now_task")
+    if existing is not None and not existing.done():
+        await update.message.reply_text("A manual run is already in progress. Wait for it to finish.")
+        return
+    chat_id = update.effective_chat.id if update.effective_chat else 0
+
+    async def _wrapped() -> None:
+        try:
+            await _run_now_background(context.application, chat_id)
+        finally:
+            context.application.bot_data["run_now_task"] = None
+
+    context.application.bot_data["run_now_task"] = asyncio.create_task(
+        _wrapped(), name="autoplugtg_run_now"
+    )
+    await update.message.reply_text("Starting forward cycle now…")
+
+
 def build_application(token: str, *, tg_log_handler=None, primary_admin_id: int | None = None) -> Application:
     admins = _parse_admin_ids()
     log_admin = primary_admin_id if primary_admin_id is not None else (next(iter(admins)) if admins else None)
@@ -616,6 +686,7 @@ def build_application(token: str, *, tg_log_handler=None, primary_admin_id: int 
     app.add_handler(CommandHandler("verify", cmd_verify))
     app.add_handler(CommandHandler("dialogs", cmd_dialogs))
     app.add_handler(CommandHandler("login", cmd_login))
+    app.add_handler(CommandHandler("run_now", cmd_run_now))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_admin_text))
 
     return app
